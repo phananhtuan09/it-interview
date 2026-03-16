@@ -2,6 +2,8 @@
 
 Thư mục này chứa các câu hỏi phỏng vấn và câu trả lời mẫu dành cho lập trình viên frontend.
 
+Xem danh sách topic hiện có và backlog gợi ý tại `INDEX.md`.
+
 ---
 
 ## Cấu Trúc Thư Mục
@@ -89,3 +91,11 @@ docs/frontend/
 - Luôn có **ví dụ code** minh họa khi cần thiết
 - Ghi rõ **mức độ câu hỏi**: Cơ bản / Trung cấp / Nâng cao
 - Tham khảo `TEMPLATE.md` để biết format chi tiết
+
+---
+
+## Điều Hướng Nhanh
+
+- `INDEX.md` — danh sách topic hiện có theo folder và gợi ý phần còn thiếu
+- `TEMPLATE.md` — mẫu chuẩn để tạo file mới
+- `python3 scripts/generate_frontend_index.py` — regenerate `INDEX.md` từ filesystem
