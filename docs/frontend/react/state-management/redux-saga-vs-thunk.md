@@ -5,7 +5,7 @@
 - **Chủ đề:** Redux Saga vs Redux Thunk
 - **Ngôn ngữ / Framework:** React / Redux
 - **Mức độ:** Trung cấp
-- **Cập nhật lần cuối:** 2026-03-11
+- **Cập nhật lần cuối:** 2026-03-15
 
 ---
 
@@ -161,6 +161,170 @@ test('fetchUserSaga gọi đúng API', () => {
 - Generator function không phải async/await — cú pháp khác nhau, cần học riêng
 - Saga có learning curve cao hơn Thunk — cân nhắc kỹ trước khi chọn cho project đơn giản
 - Redux Toolkit Query (RTK Query) là lựa chọn hiện đại thay thế Saga cho data fetching
+
+---
+
+## Câu Hỏi: Khi nào vẫn cần Redux Toolkit trong dự án Next.js hiện đại?
+
+**Mức độ:** Trung cấp
+
+### Câu hỏi
+
+Với sự phát triển của React Query (TanStack Query) hay chính cơ chế Data Fetching trong Next.js (Server Components) hiện nay, theo bạn, khi nào chúng ta vẫn thực sự cần đến một Global State Management như Redux Toolkit trong một dự án Next.js hiện đại?
+
+### Câu trả lời ngắn gọn
+
+Server Components và React Query giải quyết **Server State** (data từ API/DB) rất tốt — không cần Redux cho việc này. Redux Toolkit vẫn cần khi có **Client State thực sự global**: UI state dùng chung nhiều nơi không liên quan (sidebar open/close, theme, notification queue), workflow phức tạp nhiều bước, hoặc state cần persist và sync giữa nhiều tab. Trong dự án Next.js hiện tại, tôi chỉ dùng Redux cho client-side UI state, còn server data để Server Components hoặc React Query xử lý.
+
+### Giải thích chi tiết
+
+**Phân loại State trong Next.js hiện đại:**
+
+| Loại State | Giải pháp tốt nhất | Redux cần không? |
+|---|---|---|
+| Server data (API response) | Server Components, React Query | Không |
+| URL/search state | `useSearchParams`, `nuqs` | Không |
+| Form state | `react-hook-form`, local `useState` | Không |
+| Component-local state | `useState` | Không |
+| Global UI state (sidebar, modal, theme) | Redux Toolkit / Zustand | Có thể cần |
+| Cross-tab sync state | Redux + `redux-persist` | Có |
+| Complex client workflow | Redux Toolkit | Có |
+
+**Khi Server Components thay thế Redux hoàn toàn:**
+- Data fetch và truyền xuống component tree qua props
+- Không cần store trung gian vì component có thể fetch trực tiếp
+- Caching được Next.js xử lý tự động
+
+**Khi React Query thay thế Redux:**
+- Quản lý loading/error/success state của API call
+- Caching, refetching, invalidation
+- Optimistic updates
+
+**Khi vẫn cần Redux Toolkit:**
+1. **Global UI state dùng chung nhiều nơi không liên quan** — ví dụ: notification toast có thể trigger từ bất kỳ component nào
+2. **State cần persist qua session** — dùng `redux-persist`
+3. **Complex client-side workflow** — multi-step form wizard, undo/redo
+4. **Realtime state** — WebSocket data cần broadcast toàn app
+5. **Team quen với Redux** — migration cost không đáng
+
+**Quan điểm cá nhân từ kinh nghiệm thực tế:**
+Trong SAGAS, tôi đã giảm Redux store từ quản lý cả API data lẫn UI state xuống chỉ còn UI state. Server Components xử lý document data, React Query xử lý paginated search. Redux chỉ còn quản lý: `selectedDocuments` (multi-select state), `sidebarCollapsed`, và `notificationQueue`. Bundle size giảm đáng kể, code đơn giản hơn nhiều.
+
+### Ví dụ minh họa
+
+```tsx
+// === Trước: Redux quản lý cả Server State ===
+// ❌ Không cần thiết trong Next.js App Router
+
+// documentSlice.ts
+const documentSlice = createSlice({
+  name: 'documents',
+  initialState: { list: [], loading: false, error: null },
+  reducers: { /* ... */ },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchDocuments.pending, (state) => { state.loading = true; })
+      .addCase(fetchDocuments.fulfilled, (state, action) => {
+        state.list = action.payload;
+        state.loading = false;
+      });
+  },
+});
+
+// Component phải dispatch action để lấy data
+function DocumentsPage() {
+  const dispatch = useDispatch();
+  const documents = useSelector(state => state.documents.list);
+
+  useEffect(() => {
+    dispatch(fetchDocuments()); // ❌ Phải dispatch để fetch
+  }, [dispatch]);
+}
+```
+
+```tsx
+// === Sau: Server Component xử lý server state ===
+// ✅ Đơn giản hơn nhiều
+
+// app/documents/page.tsx — Server Component
+export default async function DocumentsPage() {
+  // Fetch trực tiếp, không qua Redux store
+  const documents = await db.document.findMany({ where: { active: true } });
+
+  return <DocumentList documents={documents} />;
+}
+```
+
+```tsx
+// === Redux chỉ còn cho Global UI State ===
+// ✅ Đây là use case thực sự cần Redux
+
+// store/uiSlice.ts
+const uiSlice = createSlice({
+  name: 'ui',
+  initialState: {
+    sidebarCollapsed: false,
+    selectedDocumentIds: [] as string[], // Multi-select state
+    notifications: [] as Notification[], // Toast queue
+  },
+  reducers: {
+    toggleSidebar: (state) => { state.sidebarCollapsed = !state.sidebarCollapsed; },
+    selectDocument: (state, action) => {
+      state.selectedDocumentIds.push(action.payload);
+    },
+    addNotification: (state, action) => {
+      state.notifications.push(action.payload);
+    },
+    removeNotification: (state, action) => {
+      state.notifications = state.notifications.filter(n => n.id !== action.payload);
+    },
+  },
+});
+
+// Notification có thể được trigger từ bất kỳ component nào trong app
+// → Đây là lý do cần Global State, không thể dùng local useState
+function DocumentUploader() {
+  const dispatch = useDispatch();
+
+  const handleUpload = async (file: File) => {
+    try {
+      await uploadDocument(file);
+      // Trigger notification từ component này
+      dispatch(addNotification({ id: uuid(), type: 'success', message: 'Upload thành công' }));
+    } catch {
+      dispatch(addNotification({ id: uuid(), type: 'error', message: 'Upload thất bại' }));
+    }
+  };
+  // ...
+}
+```
+
+```tsx
+// === React Query cho Client-side API calls cần caching ===
+// ✅ Dùng khi cần search/filter trên client
+
+function DocumentSearch() {
+  const [query, setQuery] = useState('');
+
+  // React Query: caching, deduplication, refetch on window focus
+  const { data, isLoading } = useQuery({
+    queryKey: ['documents', query],
+    queryFn: () => fetchDocuments({ q: query }),
+    enabled: query.length > 2, // Chỉ fetch khi gõ đủ ký tự
+    staleTime: 30_000, // Cache 30 giây
+  });
+
+  return (/* ... */);
+}
+```
+
+### Lưu ý / Bẫy thường gặp
+
+- **Đừng dùng Redux cho server state** trong Next.js App Router — đó là việc của Server Components và React Query
+- Redux vẫn có giá trị cho **global client state** — đặc biệt notification system, multi-select, cross-component UI sync
+- **Zustand** là lựa chọn nhẹ hơn Redux cho global client state nếu không cần Redux DevTools hay middleware phức tạp
+- Nếu state chỉ dùng trong một sub-tree của component, dùng **React Context** thay vì Redux
+- RTK Query (Redux Toolkit Query) có thể thay React Query nếu đã dùng Redux — không cần cả hai
 
 ---
 
